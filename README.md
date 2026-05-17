@@ -66,8 +66,7 @@ pip install .
 ```bash
 git clone https://github.com/varnie/derecurse.git
 cd derecurse
-pip install -e .
-pip install pytest
+pip install -e ".[dev]"
 pytest -v
 ```
 
