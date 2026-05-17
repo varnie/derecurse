@@ -1,8 +1,10 @@
-# derecurse Proof of Concept
+# derecurse (Proof of Concept)
 
 Automatic recursion optimizer for Python. The `@derecurse` decorator rewrites
 tail-recursive functions as iterative loops, eliminating `RecursionError` and
 allowing millions of recursive calls without stack growth.
+
+> ⚠️ **Disclaimer:** This project is an academic **Proof of Concept (PoC)** designed to explore AST manipulation and compiler theory in Python. It is **not recommended for production use** due to performance trade-offs, debugging complexity, and strict dependency on Python's internal AST structures.
 
 ## Quick start
 
@@ -32,6 +34,11 @@ factorial(100_000)  # no RecursionError
    a trampoline-based approach is used instead, which works without source
    access.
 
+## ⚠️ Performance & Architecture Trade-offs
+
+* **Tail-Call Optimization:** High performance. Rewriting to a `while` loop runs at native loop speed and uses $O(1)$ memory.
+* **Non-Tail CPS Optimization:** Extremely heavy. Every recursive step in CPS mode wraps computations into a new `lambda` function object. While the *lazy* wrapper ensures **zero overhead for shallow calls**, deep calls that trigger the CPS trampoline will run **2–10x slower** than native Python code and generate massive amounts of short-lived objects for the Garbage Collector.
+
 ## Installation
 
 ```bash
@@ -48,26 +55,21 @@ pip install .
 
 ## Features
 
-- **Zero runtime dependencies** — pure Python stdlib (`ast`, `inspect`, ...)
-- **Three optimization strategies** — AST rewrite (tail calls), CPS trampoline
-  (non-tail), and thunk trampoline (fallback)
-- **Non-tail recursion support** — naive Fibonacci, tree traversal, and other
-  non-tail patterns work to arbitrary depth via lazy CPS conversion
-- **Zero overhead for shallow calls** — non-tail functions run at native speed
-  until the first `RecursionError`, then CPS kicks in transparently
-- **Introspection** — rewritten functions carry `__derecurse_strategy__`,
-  `__derecurse_analysis__`, and `__wrapped__` attributes
-- **Thread-safe** — trampoline uses per-function locks for concurrent access
+* **Zero runtime dependencies** — Pure Python standard library (`ast`, `inspect`, `threading`).
+* **Three optimization strategies** — AST loop rewrite (tail calls), lazy CPS trampoline (non-tail), and functional trampoline (fallback).
+* **Non-tail recursion support** — Naive Fibonacci, deep tree traversals, and complex expressions work to arbitrary depth via lazy CPS conversion.
+* **Zero overhead for shallow calls** — Non-tail functions run at full native speed until the stack actually overflows; CPS transformation kicks in transparently on `RecursionError`.
+* **Introspection** — Optimized functions carry `__derecurse_strategy__`, `__derecurse_analysis__`, and `__wrapped__` attributes for analysis.
+* **Thread-safe** — The trampoline uses per-function locks to ensure safety during concurrent execution.
 
-## Limitations
 
-- Non-tail CPS conversion handles `BinOp`, `IfExp`, `BoolOp`, and `UnaryOp`
-  patterns with self-calls. Other expression shapes fall through to native
-  recursion (no stack overflow protection).
-- Mutual recursion is not yet handled.
-- CPS-converted functions are 2–10× slower than native for deep calls
-  (closure overhead), but shallow calls run at full speed.
-- Requires Python 3.10+.
+## Limitations & Edge Cases
+
+* **Expression Support:** Non-tail CPS conversion currently handles `BinOp`, `IfExp`, `BoolOp`, and `UnaryOp` patterns containing self-calls. Other complex expression shapes will fall through to native recursion (offering no stack protection).
+* **Mutual Recursion:** Functions that call each other (A → B → A) are not supported.
+* **Debugging & Tracebacks:** Once a function is transformed via CPS, its traceback inside logs becomes a dense sequence of repetitive `lambda` thunk evaluations inside `<derecurse:func_name>`, making traditional debugging and post-mortem analysis difficult.
+* **Python Upgrades:** Because this library directly manipulates Python's Internal AST nodes, minor changes to the Python language grammar (such as required node attributes introduced in Python 3.8/3.11+) can cause the compiler to break. Requires Python 3.10+.
+
 
 ## Development
 
