@@ -50,6 +50,33 @@ def _to_k(thing: str | ast.expr) -> ast.expr:
     return thing
 
 
+def _arguments(
+    *params: str | ast.arg,
+    defaults: list[ast.expr] | None = None,
+    kwarg: ast.arg | None = None,
+) -> ast.arguments:
+    """Build ast.arguments with all fields required since Python 3.8."""
+    args = [p if isinstance(p, ast.arg) else ast.arg(arg=p) for p in params]
+    return ast.arguments(
+        posonlyargs=[],
+        args=args,
+        vararg=None,
+        kwonlyargs=[],
+        kw_defaults=[],
+        kwarg=kwarg,
+        defaults=defaults or [],
+    )
+
+
+def _call(
+    func: ast.expr,
+    args: list[ast.expr] | None = None,
+    keywords: list[ast.keyword] | None = None,
+) -> ast.Call:
+    """Build ast.Call with keywords field required since Python 3.9."""
+    return ast.Call(func=func, args=args or [], keywords=keywords or [])
+
+
 def cps_rewrite(func, analysis: AnalysisResult):
     src = inspect.getsource(func)
     src = textwrap.dedent(src)
@@ -189,10 +216,11 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
     # ── Pure expression (no self-calls) ──────────────────────────────────
     if not _has_self_call(expr, func_name):
         return ast.Lambda(
-            args=ast.arguments(),
+            args=_arguments(),
             body=ast.Call(
                 func=_to_k(k_name),
                 args=[expr],
+                keywords=[],
             ),
         )
 
@@ -200,7 +228,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
     if _is_direct_self_call(expr, func_name):
         cps_func = f"_{func_name}_cps"
         return ast.Lambda(
-            args=ast.arguments(),
+            args=_arguments(),
             body=ast.Call(
                 func=ast.Name(id=cps_func, ctx=ast.Load()),
                 args=list(expr.args)
@@ -235,7 +263,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         body_cps = _cps_expr(expr.body, func_name, k_name)
         orelse_cps = _cps_expr(expr.orelse, func_name, k_name)
         return ast.Lambda(
-            args=ast.arguments(),
+            args=_arguments(),
             body=ast.Call(
                 func=ast.IfExp(
                     test=_cps_purify(expr.test, func_name),
@@ -243,6 +271,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
                     orelse=orelse_cps,
                 ),
                 args=[],
+                keywords=[],
             ),
         )
 
@@ -253,10 +282,11 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
 
         if not left_has and not right_has:
             return ast.Lambda(
-                args=ast.arguments(),
+                args=_arguments(),
                 body=ast.Call(
                     func=_to_k(k_name),
                     args=[expr],
+                    keywords=[],
                 ),
             )
 
@@ -267,7 +297,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
             )
             if _is_direct_self_call(expr.left, func_name):
                 return ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=ast.Name(id=f"_{func_name}_cps", ctx=ast.Load()),
                         args=list(expr.left.args) + [inner_k],
@@ -283,7 +313,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
             )
             if _is_direct_self_call(expr.right, func_name):
                 return ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=ast.Name(id=f"_{func_name}_cps", ctx=ast.Load()),
                         args=list(expr.right.args) + [inner_k],
@@ -296,9 +326,9 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         v1 = _fresh("b")
         v2 = _fresh("b")
         inner2_k = ast.Lambda(
-            args=ast.arguments(args=[ast.arg(arg=v2)]),
+            args=_arguments(v2),
             body=ast.Lambda(
-                args=ast.arguments(),
+                args=_arguments(),
                 body=ast.Call(
                     func=_to_k(k_name),
                     args=[
@@ -308,6 +338,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
                             right=ast.Name(id=v2, ctx=ast.Load()),
                         )
                     ],
+                    keywords=[],
                 ),
             ),
         )
@@ -320,14 +351,14 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         else:
             inner1_k_body = _cps_expr(expr.right, func_name, inner2_k)
         inner1_k = ast.Lambda(
-            args=ast.arguments(args=[ast.arg(arg=v1)]),
+            args=_arguments(v1),
             body=ast.Lambda(
-                args=ast.arguments(), body=inner1_k_body,
+                args=_arguments(), body=inner1_k_body,
             ),
         )
         if _is_direct_self_call(expr.left, func_name):
             return ast.Lambda(
-                args=ast.arguments(),
+                args=_arguments(),
                 body=ast.Call(
                     func=ast.Name(id=f"_{func_name}_cps", ctx=ast.Load()),
                     args=list(expr.left.args) + [inner1_k],
@@ -357,10 +388,11 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
             if result is not None:
                 return result
         return ast.Lambda(
-            args=ast.arguments(),
+            args=_arguments(),
             body=ast.Call(
                 func=_to_k(k_name),
                 args=[expr],
+                keywords=[],
             ),
         )
 
@@ -370,14 +402,15 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         if op_has:
             v = _fresh("u")
             inner_k = ast.Lambda(
-                args=ast.arguments(args=[ast.arg(arg=v)]),
+                args=_arguments(v),
                 body=ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=_to_k(k_name),
                         args=[
                             ast.UnaryOp(op=expr.op, operand=ast.Name(id=v, ctx=ast.Load()))
                         ],
+                        keywords=[],
                     ),
                 ),
             )
@@ -388,9 +421,9 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         if _has_self_call(expr.value, func_name):
             v = _fresh("a")
             inner_k = ast.Lambda(
-                args=ast.arguments(args=[ast.arg(arg=v)]),
+                args=_arguments(v),
                 body=ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=_to_k(k_name),
                         args=[
@@ -399,6 +432,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
                                 attr=expr.attr, ctx=ast.Load(),
                             )
                         ],
+                        keywords=[],
                     ),
                 ),
             )
@@ -411,9 +445,9 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         if val_has and not slc_has:
             v = _fresh("s")
             inner_k = ast.Lambda(
-                args=ast.arguments(args=[ast.arg(arg=v)]),
+                args=_arguments(v),
                 body=ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=_to_k(k_name),
                         args=[
@@ -423,6 +457,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
                                 ctx=ast.Load(),
                             )
                         ],
+                        keywords=[],
                     ),
                 ),
             )
@@ -430,9 +465,9 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
         if not val_has and slc_has:
             v = _fresh("s")
             inner_k = ast.Lambda(
-                args=ast.arguments(args=[ast.arg(arg=v)]),
+                args=_arguments(v),
                 body=ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Call(
                         func=_to_k(k_name),
                         args=[
@@ -442,6 +477,7 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
                                 ctx=ast.Load(),
                             )
                         ],
+                        keywords=[],
                     ),
                 ),
             )
@@ -485,11 +521,8 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
 
     # ── Fallback: thunk(k(expr)) — won't help deep recursion ─────────────
     return ast.Lambda(
-        args=ast.arguments(),
-        body=ast.Call(
-            func=_to_k(k_name),
-            args=[expr],
-        ),
+        args=_arguments(),
+        body=_call(_to_k(k_name), [expr]),
     )
 
 
@@ -563,10 +596,7 @@ def _cps_seq(
         t_var = temps[idx]
 
         if idx == len(cps_indices) - 1:
-            body: ast.expr = ast.Call(
-                func=final_k,
-                args=[rebuild(full_list())],
-            )
+            body: ast.expr = _call(final_k, [rebuild(full_list())])
         else:
             next_pos = cps_indices[idx + 1]
             next_expr = exprs[next_pos]
@@ -580,8 +610,8 @@ def _cps_seq(
                 body = _cps_expr(next_expr, func_name, curr_k)
 
         curr_k = ast.Lambda(
-            args=ast.arguments(args=[ast.arg(arg=t_var)]),
-            body=ast.Lambda(args=ast.arguments(), body=body),
+            args=_arguments(t_var),
+            body=ast.Lambda(args=_arguments(), body=body),
         )
 
     first = exprs[cps_indices[0]]
@@ -638,13 +668,10 @@ def _make_binop_k(
             right=ast.Name(id=v_name, ctx=ast.Load()),
         )
     return ast.Lambda(
-        args=ast.arguments(args=[ast.arg(arg=v_name)]),
+        args=_arguments(v_name),
         body=ast.Lambda(
-            args=ast.arguments(),
-            body=ast.Call(
-                func=_to_k(k_name),
-                args=[body_expr],
-            ),
+            args=_arguments(),
+            body=_call(_to_k(k_name), [body_expr]),
         ),
     )
 
@@ -670,9 +697,9 @@ def _build_wrapper(
         ast.Assign(
             targets=[ast.Name(id="__k__", ctx=ast.Store())],
             value=ast.Lambda(
-                args=ast.arguments(args=[ast.arg(arg="__v__")]),
+                args=_arguments("__v__"),
                 body=ast.Lambda(
-                    args=ast.arguments(),
+                    args=_arguments(),
                     body=ast.Name(id="__v__", ctx=ast.Load()),
                 ),
             ),
@@ -680,25 +707,22 @@ def _build_wrapper(
         # __r = cps_name(p1, p2, ..., __k)
         ast.Assign(
             targets=[ast.Name(id="__r__", ctx=ast.Store())],
-            value=ast.Call(
-                func=ast.Name(id=cps_name, ctx=ast.Load()),
-                args=[ast.Name(id=p, ctx=ast.Load()) for p in params]
+            value=_call(
+                ast.Name(id=cps_name, ctx=ast.Load()),
+                [ast.Name(id=p, ctx=ast.Load()) for p in params]
                 + [ast.Name(id="__k__", ctx=ast.Load())],
             ),
         ),
         # while callable(__r): __r = __r()
         ast.While(
-            test=ast.Call(
-                func=ast.Name(id="callable", ctx=ast.Load()),
-                args=[ast.Name(id="__r__", ctx=ast.Load())],
+            test=_call(
+                ast.Name(id="callable", ctx=ast.Load()),
+                [ast.Name(id="__r__", ctx=ast.Load())],
             ),
             body=[
                 ast.Assign(
                     targets=[ast.Name(id="__r__", ctx=ast.Store())],
-                    value=ast.Call(
-                        func=ast.Name(id="__r__", ctx=ast.Load()),
-                        args=[],
-                    ),
+                    value=_call(ast.Name(id="__r__", ctx=ast.Load())),
                 ),
             ],
             orelse=[],
@@ -709,10 +733,7 @@ def _build_wrapper(
 
     return ast.FunctionDef(
         name=orig_name,
-        args=ast.arguments(
-            args=[ast.arg(arg=p) for p in params],
-            kwarg=ast.arg(arg="__kwargs__"),
-        ),
+        args=_arguments(*params, kwarg=ast.arg(arg="__kwargs__")),
         body=body,
         decorator_list=[],
     )
