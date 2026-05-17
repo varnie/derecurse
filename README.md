@@ -22,14 +22,15 @@ factorial(100_000)  # no RecursionError
 
 1. **Analyze** — the decorator inspects the function's AST to classify its
    recursion pattern (tail call, non-tail, or none).
-2. **Rewrite** — for tail-recursive functions, the AST is rewritten in-place
-   to a `while True` loop with parameter reassignment. This is transparent —
-   the original source is never modified.
-3. **Fall back** — if source inspection fails (e.g. in a REPL or lambda),
+2. **Tail-call rewrite** — the AST is rewritten in-place to a `while True`
+   loop with parameter reassignment. The original source is never modified.
+3. **Non-tail CPS rewrite** — for non-tail-recursive functions (e.g. naive
+   Fibonacci), a CPS (Continuation-Passing Style) conversion + thunk trampoline
+   is used. The function runs at native speed for shallow calls, and only
+   converts on the first `RecursionError`.
+4. **Fall back** — if source inspection fails (e.g. in a REPL or lambda),
    a trampoline-based approach is used instead, which works without source
    access.
-4. **Warn** — non-tail-recursive functions (e.g. naive Fibonacci) are returned
-   unchanged with a warning and a hint about adding an accumulator.
 
 ## Installation
 
@@ -48,17 +49,24 @@ pip install .
 ## Features
 
 - **Zero runtime dependencies** — pure Python stdlib (`ast`, `inspect`, ...)
-- **Two optimization strategies** — AST rewrite (clean) and trampoline (universal)
-- **Graceful degradation** — non-tail functions pass through with a warning
+- **Three optimization strategies** — AST rewrite (tail calls), CPS trampoline
+  (non-tail), and thunk trampoline (fallback)
+- **Non-tail recursion support** — naive Fibonacci, tree traversal, and other
+  non-tail patterns work to arbitrary depth via lazy CPS conversion
+- **Zero overhead for shallow calls** — non-tail functions run at native speed
+  until the first `RecursionError`, then CPS kicks in transparently
 - **Introspection** — rewritten functions carry `__derecurse_strategy__`,
   `__derecurse_analysis__`, and `__wrapped__` attributes
 - **Thread-safe** — trampoline uses per-function locks for concurrent access
 
 ## Limitations
 
-- Only **tail-recursive** functions are optimized. Non-tail recursion
-  (e.g. `return f(n-1) + f(n-2)`) cannot be safely converted and is left
-  unchanged.
+- Non-tail CPS conversion handles `BinOp`, `IfExp`, `BoolOp`, and `UnaryOp`
+  patterns with self-calls. Other expression shapes fall through to native
+  recursion (no stack overflow protection).
+- Mutual recursion is not yet handled.
+- CPS-converted functions are 2–10× slower than native for deep calls
+  (closure overhead), but shallow calls run at full speed.
 - Requires Python 3.10+.
 
 ## Development

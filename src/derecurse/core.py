@@ -65,13 +65,45 @@ def derecurse(func: F) -> Callable:
             return func
 
     if analysis.pattern == RecursionPattern.NON_TAIL:
-        warnings.warn(
-            f"[derecurse] '{func.__name__}' has non-tail recursion "
-            f"({analysis.non_tail_count} call(s) embedded in expressions). "
-            "Cannot safely convert to loop. "
-            "Hint: add an accumulator parameter to make it tail-recursive.",
-            stacklevel=2,
-        )
-        return func
+        return _lazy_cps_wrapper(func, analysis)
 
     return func
+
+
+def _lazy_cps_wrapper(func, analysis):
+    """
+    Lazy CPS wrapper for non-tail-recursive functions.
+    Runs the original function directly (zero overhead) and only
+    CPS-converts on the first RecursionError.
+    """
+    cps_func = None
+
+    def wrapper(*args, **kwargs):
+        nonlocal cps_func
+        try:
+            return func(*args, **kwargs)
+        except RecursionError:
+            if cps_func is None:
+                cps_func = _build_cps(func, analysis)
+                if cps_func is None:
+                    raise
+            return cps_func(*args, **kwargs)
+
+    wrapper.__derecurse_strategy__ = "lazy_cps"
+    wrapper.__wrapped__ = func
+    return wrapper
+
+
+def _build_cps(func, analysis):
+    """Attempt CPS rewrite; return None on failure."""
+    try:
+        from .cps import cps_rewrite
+        cps_func = cps_rewrite(func, analysis)
+        cps_func.__derecurse_analysis__ = analysis
+        return cps_func
+    except Exception as exc:
+        warnings.warn(
+            f"[derecurse] CPS rewrite failed for '{func.__name__}': {exc}",
+            stacklevel=2,
+        )
+        return None

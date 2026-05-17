@@ -64,6 +64,101 @@ def fib_nontail(n):
     if n <= 1: return n
     return fib_nontail(n - 1) + fib_nontail(n - 2)
 
+def _sum_nontail(n):
+    if n <= 0: return 0
+    return n + _sum_nontail(n - 1)
+
+def _sum_left(n):
+    if n <= 0: return 0
+    return _sum_left(n - 1) + 1
+
+def _sum_right(n):
+    if n <= 0: return 0
+    return 1 + _sum_right(n - 1)
+
+def _sum_ifexp(n):
+    if n <= 0: return 0
+    return _sum_ifexp(n - 1) + 0 if n % 2 == 0 else _sum_ifexp(n - 1) + 1
+
+_arr = list(range(2000))
+
+def _sub_slice_test(n):
+    if n <= 0: return 0
+    return _arr[_sub_slice_test(n - 1)] + 1
+
+def _sub_val_test(n):
+    if n <= 0: return [0]
+    return [_sub_val_test(n - 1)[0] + 1]
+
+def _list_elts(n):
+    if n <= 0: return []
+    return [_list_elts(n - 1), 0]
+
+def _tuple_elts(n):
+    if n <= 0: return ()
+    return (_tuple_elts(n - 1), 0)
+
+def _set_elts(n):
+    if n <= 0: return frozenset()
+    return frozenset({_set_elts(n - 1), 0})
+
+def _dict_nontail(n):
+    if n <= 0: return {0: 0}
+    return {0: _dict_nontail(n - 1)}
+
+def _compare_nontail(n):
+    if n <= 0: return 0
+    return (_compare_nontail(n - 1) > 0) + 0
+
+def _boolop3_or(n):
+    if n <= 0: return 0
+    return (_boolop3_or(n - 1) or True or False) + 0
+
+def _unary_nontail(n):
+    if n <= 0: return 0
+    return -_unary_nontail(n - 1)
+
+def _attr_nontail(n):
+    if n <= 0: return 0
+    return _attr_nontail(n - 1).real + 1
+
+def _seq3_max(n):
+    if n <= 0: return 0
+    return max(_seq3_max(n - 1) + 1, _seq3_max(n - 2) + 2, _seq3_max(n - 3) + 3, 0)
+
+def _dict_kwargs(n):
+    if n <= 0: return {}
+    return {**_dict_kwargs(n - 1), n: n}
+
+def _multi_branch_nontail(n):
+    if n <= 0: return 0
+    if n % 2 == 0:
+        return _multi_branch_nontail(n - 1) + 1
+    return _multi_branch_nontail(n - 2) + 2
+
+def _while_nontail(n):
+    if n <= 0: return 0
+    total = 0
+    i = 0
+    while i < n % 5:
+        total += 1
+        i += 1
+    return _while_nontail(n - 1) + total
+
+def _for_nontail(n):
+    if n <= 0: return 0
+    total = 0
+    for _ in range(n % 3):
+        total += 1
+    return _for_nontail(n - 1) + total
+
+def _try_nontail(n):
+    if n <= 0: return 0
+    try:
+        return _try_nontail(n - 1) + 1
+    except ValueError:
+        return 0
+
 
 # ─── Analyzer tests ───────────────────────────────────────────────────────────
 
@@ -177,18 +272,87 @@ class TestDerecurse:
         assert wrapped(2, 3) == 5
         assert not hasattr(wrapped, "__derecurse_strategy__")
 
-    def test_non_tail_warns(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            derecurse(fib_nontail)
-            assert len(w) == 1
-            assert "non-tail" in str(w[0].message).lower()
+    def test_non_tail_strategy(self):
+        f = derecurse(fib_nontail)
+        assert f.__derecurse_strategy__ == "lazy_cps"
 
     def test_non_tail_still_works(self):
-        with warnings.catch_warnings(record=True):
-            warnings.simplefilter("always")
-            f = derecurse(fib_nontail)
+        f = derecurse(fib_nontail)
         assert f(10) == 55
+
+    def test_non_tail_deep(self):
+        f = derecurse(_sum_nontail)
+        assert f(5000) == 5000 * 5001 // 2
+
+    def test_non_tail_binop_left(self):
+        f = derecurse(_sum_left)
+        assert f(10) == 10
+        assert f(5000) == 5000
+
+    def test_non_tail_binop_right(self):
+        f = derecurse(_sum_right)
+        assert f(10) == 10
+        assert f(5000) == 5000
+
+    def test_non_tail_ifexp(self):
+        f = derecurse(_sum_ifexp)
+        assert f(10) == 5
+        assert f(5000) == 2500
+
+    def test_non_tail_subscript_slice(self):
+        f = derecurse(_sub_slice_test)
+        assert f(10) == 10
+        assert f(500) == 500
+
+    def test_non_tail_subscript_value(self):
+        f = derecurse(_sub_val_test)
+        r = f(10)
+        assert isinstance(r, list) and r[0] == 10
+        r = f(500)
+        assert isinstance(r, list) and r[0] == 500
+
+    def test_non_tail_list(self):
+        f = derecurse(_list_elts)
+        r = f(10)
+        assert isinstance(r, list) and len(r) == 2
+
+    def test_non_tail_tuple(self):
+        f = derecurse(_tuple_elts)
+        r = f(10)
+        assert isinstance(r, tuple) and len(r) == 2
+
+    def test_non_tail_set(self):
+        import sys as _sys
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            f = derecurse(_set_elts)
+            r = f(10)
+            assert isinstance(r, frozenset)
+            r = f(500)
+            assert isinstance(r, frozenset)
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_dict(self):
+        f = derecurse(_dict_nontail)
+        r = f(3)
+        assert isinstance(r, dict)
+
+    def test_non_tail_compare(self):
+        import sys as _sys
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            f = derecurse(_compare_nontail)
+            assert f(10) == 0
+            assert f(5000) == 0
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_boolop3(self):
+        f = derecurse(_boolop3_or)
+        assert f(10) == 1
 
     def test_wrapped_preserved(self):
         f = derecurse(_factorial)
@@ -207,6 +371,94 @@ class TestDerecurse:
         f = derecurse(_countdown_kw)
         assert f(5) == 0
         assert f(100) == 0
+
+    def test_non_tail_unary(self):
+        import sys as _sys
+        f = derecurse(_unary_nontail)
+        assert f(10) == 0
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 0
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_attr(self):
+        import sys as _sys
+        f = derecurse(_attr_nontail)
+        assert f(10) == 10
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 5000
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_seq3(self):
+        f = derecurse(_seq3_max)
+        assert f(0) == 0
+        assert f(1) == 3
+        assert f(2) == 4
+        assert f(3) == 5
+        assert f(5) == 7
+        assert f(10) == 12
+
+    def test_non_tail_dict_kwargs(self):
+        import sys as _sys
+        f = derecurse(_dict_kwargs)
+        r = f(10)
+        assert isinstance(r, dict) and len(r) == 10
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            r = f(500)
+            assert isinstance(r, dict) and len(r) == 500
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_multi_branch(self):
+        import sys as _sys
+        f = derecurse(_multi_branch_nontail)
+        assert f(10) == 11
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 5001
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_while(self):
+        import sys as _sys
+        f = derecurse(_while_nontail)
+        assert f(10) == 20
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 10000
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_for(self):
+        import sys as _sys
+        f = derecurse(_for_nontail)
+        assert f(10) == 10
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 5001
+        finally:
+            _sys.setrecursionlimit(old)
+
+    def test_non_tail_try(self):
+        import sys as _sys
+        f = derecurse(_try_nontail)
+        assert f(10) == 10
+        old = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(300)
+        try:
+            assert f(5000) == 5000
+        finally:
+            _sys.setrecursionlimit(old)
 
 
 # ─── Stress tests ─────────────────────────────────────────────────────────────
