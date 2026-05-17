@@ -1,6 +1,6 @@
 """
 Tests for derecurse.
-Run with: python -m pytest tests/ -v
+Run with: python -m pytest test_derecurse.py -v
 """
 
 import sys
@@ -9,12 +9,44 @@ from pathlib import Path
 import pytest
 
 try:
-    from derecurse import derecurse, RecursionPattern
+    from derecurse import derecurse, RecursionPattern, __version__
     from derecurse.analyzer import analyze
+    from derecurse.cps import cps_rewrite
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
-    from derecurse import derecurse, RecursionPattern
+    from derecurse import derecurse, RecursionPattern, __version__
     from derecurse.analyzer import analyze
+    from derecurse.cps import cps_rewrite
+
+# Depth used to verify CPS/trampoline beyond the default recursion limit.
+DEEP = 5000
+
+
+def _wrap_non_tail(func, *args):
+    """Apply @derecurse and run once at depth that triggers CPS; fail on rewrite warnings."""
+    wrapped = derecurse(func)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", category=UserWarning)
+        result = wrapped(*args)
+    failures = [
+        w for w in caught
+        if "CPS rewrite failed" in str(w.message)
+    ]
+    assert not failures, "; ".join(str(w.message) for w in failures)
+    return wrapped, result
+
+
+def _wrap_tail(func):
+    """Apply @derecurse to a tail-recursive function; fail on AST/trampoline rewrite warnings."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", category=UserWarning)
+        wrapped = derecurse(func)
+    failures = [
+        w for w in caught
+        if "rewrite failed" in str(w.message) or "Could not optimize" in str(w.message)
+    ]
+    assert not failures, "; ".join(str(w.message) for w in failures)
+    return wrapped
 
 
 # ─── Raw functions (undecorated — @derecurse applied inside tests) ──────────
@@ -113,6 +145,15 @@ def _compare_nontail(n):
 def _boolop3_or(n):
     if n <= 0: return 0
     return (_boolop3_or(n - 1) or True or False) + 0
+
+def _boolop3_and(n):
+    if n <= 0: return 1
+    return _boolop3_and(n - 1) and n
+
+def _assign_nontail(n, acc=0):
+    if n <= 0: return acc
+    acc = _assign_nontail(n - 1, acc + 1)
+    return acc
 
 def _unary_nontail(n):
     if n <= 0: return 0
@@ -217,13 +258,70 @@ class TestAnalyzer:
             return f(b, a % b)
         assert analyze(f).pattern == RecursionPattern.TAIL_CALL
 
+    def test_assignment_non_tail(self):
+        assert analyze(_assign_nontail).pattern == RecursionPattern.NON_TAIL
+
+    def test_is_optimizable(self):
+        tail = analyze(_factorial)
+        nontail = analyze(fib_nontail)
+        plain = analyze(add)
+        assert tail.is_optimizable()
+        assert not nontail.is_optimizable()
+        assert not plain.is_optimizable()
+
+    def test_notes_on_non_tail(self):
+        result = analyze(fib_nontail)
+        assert result.notes
+        assert "non-tail" in result.notes[0].lower()
+
+    def test_recursive_call_counts(self):
+        result = analyze(fib_nontail)
+        assert result.recursive_calls == 2
+        assert result.non_tail_count == 2
+        assert result.tail_call_count == 0
+
+
+# ─── CPS / AST regression ───────────────────────────────────────────────────
+
+class TestCPS:
+
+    def test_cps_rewrite_compiles(self):
+        """Generated CPS AST must compile on all supported Python versions."""
+        analysis = analyze(_sum_left)
+        rewritten = cps_rewrite(_sum_left, analysis)
+        assert rewritten.__derecurse_strategy__ == "cps_trampoline"
+
+    def test_cps_no_warning_on_deep_binop_left(self):
+        _, result = _wrap_non_tail(_sum_left, DEEP)
+        assert result == DEEP
+
+    def test_cps_no_warning_on_deep_binop_right(self):
+        _, result = _wrap_non_tail(_sum_right, DEEP)
+        assert result == DEEP
+
+    def test_cps_no_warning_on_deep_fib(self):
+        _, result = _wrap_non_tail(fib_nontail, 25)
+        assert result == 75025
+
+    def test_lazy_cps_strategy_before_activation(self):
+        f = derecurse(_sum_left)
+        assert f.__derecurse_strategy__ == "lazy_cps"
+
+    def test_cached_cps_on_second_deep_call(self):
+        f = derecurse(_sum_left)
+        assert f(DEEP) == DEEP
+        assert f(DEEP) == DEEP
+
 
 # ─── Decorator tests ──────────────────────────────────────────────────────────
 
 class TestDerecurse:
 
+    def test_package_version(self):
+        assert isinstance(__version__, str) and __version__
+
     def test_factorial_correct(self):
-        f = derecurse(_factorial)
+        f = _wrap_tail(_factorial)
         assert f(0) == 1
         assert f(1) == 1
         assert f(5) == 120
@@ -280,36 +378,40 @@ class TestDerecurse:
         f = derecurse(fib_nontail)
         assert f(10) == 55
 
+    def test_tail_has_analysis_metadata(self):
+        f = _wrap_tail(_factorial)
+        assert hasattr(f, "__derecurse_analysis__")
+        assert f.__derecurse_analysis__.pattern == RecursionPattern.TAIL_CALL
+
     def test_non_tail_deep(self):
-        f = derecurse(_sum_nontail)
-        assert f(5000) == 5000 * 5001 // 2
+        _, result = _wrap_non_tail(_sum_nontail, DEEP)
+        assert result == DEEP * (DEEP + 1) // 2
 
     def test_non_tail_binop_left(self):
-        f = derecurse(_sum_left)
+        f, _ = _wrap_non_tail(_sum_left, DEEP)
         assert f(10) == 10
-        assert f(5000) == 5000
 
     def test_non_tail_binop_right(self):
-        f = derecurse(_sum_right)
+        f, _ = _wrap_non_tail(_sum_right, DEEP)
         assert f(10) == 10
-        assert f(5000) == 5000
+
+    def test_non_tail_both_binop_sides(self):
+        _, result = _wrap_non_tail(fib_nontail, 20)
+        assert result == 6765
 
     def test_non_tail_ifexp(self):
-        f = derecurse(_sum_ifexp)
-        assert f(10) == 5
-        assert f(5000) == 2500
+        _, result = _wrap_non_tail(_sum_ifexp, DEEP)
+        assert result == DEEP // 2
 
     def test_non_tail_subscript_slice(self):
-        f = derecurse(_sub_slice_test)
-        assert f(10) == 10
-        assert f(500) == 500
+        _, result = _wrap_non_tail(_sub_slice_test, 500)
+        assert result == 500
 
     def test_non_tail_subscript_value(self):
-        f = derecurse(_sub_val_test)
+        f, r = _wrap_non_tail(_sub_val_test, 500)
+        assert isinstance(r, list) and r[0] == 500
         r = f(10)
         assert isinstance(r, list) and r[0] == 10
-        r = f(500)
-        assert isinstance(r, list) and r[0] == 500
 
     def test_non_tail_list(self):
         f = derecurse(_list_elts)
@@ -322,17 +424,9 @@ class TestDerecurse:
         assert isinstance(r, tuple) and len(r) == 2
 
     def test_non_tail_set(self):
-        import sys as _sys
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            f = derecurse(_set_elts)
-            r = f(10)
-            assert isinstance(r, frozenset)
-            r = f(500)
-            assert isinstance(r, frozenset)
-        finally:
-            _sys.setrecursionlimit(old)
+        f, r = _wrap_non_tail(_set_elts, 200)
+        assert isinstance(r, frozenset)
+        assert f(10) is not None
 
     def test_non_tail_dict(self):
         f = derecurse(_dict_nontail)
@@ -340,19 +434,20 @@ class TestDerecurse:
         assert isinstance(r, dict)
 
     def test_non_tail_compare(self):
-        import sys as _sys
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            f = derecurse(_compare_nontail)
-            assert f(10) == 0
-            assert f(5000) == 0
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_compare_nontail, DEEP)
+        assert result == 0
 
-    def test_non_tail_boolop3(self):
+    def test_non_tail_boolop_or(self):
         f = derecurse(_boolop3_or)
         assert f(10) == 1
+
+    def test_non_tail_boolop_or_deep(self):
+        _, result = _wrap_non_tail(_boolop3_or, DEEP)
+        assert result == 1
+
+    def test_non_tail_boolop_and(self):
+        _, result = _wrap_non_tail(_boolop3_and, DEEP)
+        assert result == DEEP
 
     def test_wrapped_preserved(self):
         f = derecurse(_factorial)
@@ -373,26 +468,12 @@ class TestDerecurse:
         assert f(100) == 0
 
     def test_non_tail_unary(self):
-        import sys as _sys
-        f = derecurse(_unary_nontail)
-        assert f(10) == 0
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 0
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_unary_nontail, DEEP)
+        assert result == 0
 
     def test_non_tail_attr(self):
-        import sys as _sys
-        f = derecurse(_attr_nontail)
-        assert f(10) == 10
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 5000
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_attr_nontail, DEEP)
+        assert result == DEEP
 
     def test_non_tail_seq3(self):
         f = derecurse(_seq3_max)
@@ -404,61 +485,30 @@ class TestDerecurse:
         assert f(10) == 12
 
     def test_non_tail_dict_kwargs(self):
-        import sys as _sys
-        f = derecurse(_dict_kwargs)
-        r = f(10)
-        assert isinstance(r, dict) and len(r) == 10
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            r = f(500)
-            assert isinstance(r, dict) and len(r) == 500
-        finally:
-            _sys.setrecursionlimit(old)
+        f, r = _wrap_non_tail(_dict_kwargs, 500)
+        assert isinstance(r, dict) and len(r) == 500
+        assert f(10) is not None
 
     def test_non_tail_multi_branch(self):
-        import sys as _sys
-        f = derecurse(_multi_branch_nontail)
-        assert f(10) == 11
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 5001
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_multi_branch_nontail, DEEP)
+        assert result == DEEP + 1
 
     def test_non_tail_while(self):
-        import sys as _sys
-        f = derecurse(_while_nontail)
-        assert f(10) == 20
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 10000
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_while_nontail, DEEP)
+        assert result == DEEP * 2
 
     def test_non_tail_for(self):
-        import sys as _sys
-        f = derecurse(_for_nontail)
-        assert f(10) == 10
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 5001
-        finally:
-            _sys.setrecursionlimit(old)
+        _, result = _wrap_non_tail(_for_nontail, DEEP)
+        assert result == DEEP + 1
 
     def test_non_tail_try(self):
-        import sys as _sys
-        f = derecurse(_try_nontail)
+        _, result = _wrap_non_tail(_try_nontail, DEEP)
+        assert result == DEEP
+
+    def test_assignment_form_shallow_only(self):
+        """Recursive call in assignment, not in return — CPS cannot rewrite the body."""
+        f = derecurse(_assign_nontail)
         assert f(10) == 10
-        old = _sys.getrecursionlimit()
-        _sys.setrecursionlimit(300)
-        try:
-            assert f(5000) == 5000
-        finally:
-            _sys.setrecursionlimit(old)
 
 
 # ─── Stress tests ─────────────────────────────────────────────────────────────

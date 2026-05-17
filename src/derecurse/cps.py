@@ -260,18 +260,44 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
 
     # ── IfExp: CPS both branches ─────────────────────────────────────────
     if isinstance(expr, ast.IfExp):
+        test_has = _has_self_call(expr.test, func_name)
+        if test_has:
+            # Evaluate the test via CPS first; branch on a pure Name (never the
+            # original function — that would bypass CPS and blow the stack).
+            v = _fresh("c")
+            orelse_cps = _cps_expr(expr.orelse, func_name, k_name)
+            if expr.body is expr.test:
+                if_body: ast.expr = ast.Lambda(
+                    args=_arguments(),
+                    body=_call(_to_k(k_name), [ast.Name(id=v, ctx=ast.Load())]),
+                )
+            else:
+                if_body = _cps_expr(expr.body, func_name, k_name)
+            inner_k = ast.Lambda(
+                args=_arguments(v),
+                body=ast.Lambda(
+                    args=_arguments(),
+                    body=_call(
+                        ast.IfExp(
+                            test=ast.Name(id=v, ctx=ast.Load()),
+                            body=if_body,
+                            orelse=orelse_cps,
+                        ),
+                    ),
+                ),
+            )
+            return _cps_expr(expr.test, func_name, inner_k)
+
         body_cps = _cps_expr(expr.body, func_name, k_name)
         orelse_cps = _cps_expr(expr.orelse, func_name, k_name)
         return ast.Lambda(
             args=_arguments(),
-            body=ast.Call(
-                func=ast.IfExp(
+            body=_call(
+                ast.IfExp(
                     test=_cps_purify(expr.test, func_name),
                     body=body_cps,
                     orelse=orelse_cps,
                 ),
-                args=[],
-                keywords=[],
             ),
         )
 
