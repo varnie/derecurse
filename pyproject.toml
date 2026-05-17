@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "derecurse"
+version = "0.1.0"
+description = "Automatic recursion optimizer — rewrite tail-recursive functions as iterative loops"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["recursion", "optimization", "tail-call", "tco"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dynamic = ["dependencies"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["derecurse*"]
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = ["test_*.py"]
