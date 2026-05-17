@@ -1,4 +1,4 @@
-# derecurse
+# derecurse Proof of Concept
 
 Automatic recursion optimizer for Python. The `@derecurse` decorator rewrites
 tail-recursive functions as iterative loops, eliminating `RecursionError` and
