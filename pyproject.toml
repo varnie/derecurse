@@ -27,7 +27,7 @@ where = ["src"]
 include = ["derecurse*"]
 
 [tool.pytest.ini_options]
-testpaths = ["."]
+testpaths = ["tests"]
 python_files = ["test_*.py"]
 
 [tool.ruff]

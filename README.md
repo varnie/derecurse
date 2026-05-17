@@ -75,7 +75,14 @@ pip install .
 git clone https://github.com/varnie/derecurse.git
 cd derecurse
 pip install -e ".[dev]"
-pytest -v
+pytest tests/ -v
+```
+
+Or with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv sync --extra dev
+uv run pytest tests/ -v
 ```
 
 ## API
