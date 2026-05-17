@@ -17,7 +17,7 @@ from .trampoline import trampoline_wrap
 F = TypeVar("F", bound=Callable)
 
 
-def derecurse(func: F) -> F:
+def derecurse(func: F) -> Callable:
     """
     Decorator that automatically optimizes recursive functions.
 
@@ -45,15 +45,18 @@ def derecurse(func: F) -> F:
             from .rewriter import rewrite_tail_call
             optimized = rewrite_tail_call(func, analysis)
             optimized.__derecurse_analysis__ = analysis
-            return optimized  # type: ignore
-        except Exception:
-            pass
+            return optimized
+        except Exception as exc:
+            warnings.warn(
+                f"[derecurse] AST rewrite failed for '{func.__name__}': {exc}",
+                stacklevel=2,
+            )
 
         # Fall back to trampoline — works without source code
         try:
             optimized = trampoline_wrap(func)
             optimized.__derecurse_analysis__ = analysis
-            return optimized  # type: ignore
+            return optimized
         except Exception as e:
             warnings.warn(
                 f"[derecurse] Could not optimize '{func.__name__}': {e}",

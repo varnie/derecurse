@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Automatic recursion optimizer — rewrite tail-recursive functions as iterative loops"
 requires-python = ">=3.10"
 license = {text = "MIT"}
+readme = "README.md"
 keywords = ["recursion", "optimization", "tail-call", "tco"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,3 +26,12 @@ include = ["derecurse*"]
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = ["test_*.py"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"

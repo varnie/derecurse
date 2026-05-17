@@ -17,59 +17,48 @@ except ImportError:
     from derecurse.analyzer import analyze
 
 
-# ─── Module-level optimized functions ────────────────────────────────────────
-# derecurse works best on module-level functions (getsource + trampoline both work)
+# ─── Raw functions (undecorated — @derecurse applied inside tests) ──────────
 
-@derecurse
-def factorial(n, acc=1):
+def _factorial(n, acc=1):
     if n == 0: return acc
-    return factorial(n - 1, n * acc)
+    return _factorial(n - 1, n * acc)
 
-@derecurse
-def countdown(n):
+def _countdown(n):
     if n <= 0: return 0
-    return countdown(n - 1)
+    return _countdown(n - 1)
 
-@derecurse
-def gcd(a, b):
+def _gcd(a, b):
     if b == 0: return a
-    return gcd(b, a % b)
+    return _gcd(b, a % b)
 
-@derecurse
-def power(base, exp, acc=1):
+def _power(base, exp, acc=1):
     if exp == 0: return acc
-    return power(base, exp - 1, acc * base)
+    return _power(base, exp - 1, acc * base)
 
-@derecurse
-def mysum(n, acc=0):
+def _mysum(n, acc=0):
     if n == 0: return acc
-    return mysum(n - 1, acc + n)
+    return _mysum(n - 1, acc + n)
 
-@derecurse
-def fib_tail(n, a=0, b=1):
+def _fib_tail(n, a=0, b=1):
     if n == 0: return a
-    return fib_tail(n - 1, b, a + b)
+    return _fib_tail(n - 1, b, a + b)
 
-@derecurse
-def deep(n, acc=0):
+def _deep(n, acc=0):
     if n == 0: return acc
-    return deep(n - 1, acc + 1)
+    return _deep(n - 1, acc + 1)
 
-@derecurse
-def collatz_steps(n, steps=0):
+def _collatz_steps(n, steps=0):
     if n == 1: return steps
     if n % 2 == 0:
-        return collatz_steps(n // 2, steps + 1)
-    return collatz_steps(3 * n + 1, steps + 1)
+        return _collatz_steps(n // 2, steps + 1)
+    return _collatz_steps(3 * n + 1, steps + 1)
 
-@derecurse
-def countdown_kw(n, result=0):
+def _countdown_kw(n, result=0):
     if n == 0: return result
-    return countdown_kw(n=n - 1, result=result)
+    return _countdown_kw(n=n - 1, result=result)
 
 def add(a, b):
     return a + b
-add_wrapped = derecurse(add)
 
 def fib_nontail(n):
     if n <= 1: return n
@@ -139,45 +128,54 @@ class TestAnalyzer:
 class TestDerecurse:
 
     def test_factorial_correct(self):
-        assert factorial(0) == 1
-        assert factorial(1) == 1
-        assert factorial(5) == 120
-        assert factorial(10) == 3628800
+        f = derecurse(_factorial)
+        assert f(0) == 1
+        assert f(1) == 1
+        assert f(5) == 120
+        assert f(10) == 3628800
 
     def test_factorial_large(self):
-        result = factorial(5000)
+        f = derecurse(_factorial)
+        result = f(5000)
         assert result > 0
 
     def test_factorial_strategy_tag(self):
-        assert hasattr(factorial, "__derecurse_strategy__")
-        assert factorial.__derecurse_strategy__ in ("tail_call_to_loop", "trampoline")
+        f = derecurse(_factorial)
+        assert hasattr(f, "__derecurse_strategy__")
+        assert f.__derecurse_strategy__ in ("tail_call_to_loop", "trampoline")
 
     def test_countdown(self):
-        assert countdown(0) == 0
-        assert countdown(1) == 0
-        assert countdown(100) == 0
+        f = derecurse(_countdown)
+        assert f(0) == 0
+        assert f(1) == 0
+        assert f(100) == 0
 
     def test_countdown_large(self):
-        assert countdown(100_000) == 0
+        f = derecurse(_countdown)
+        assert f(100_000) == 0
 
     def test_gcd(self):
-        assert gcd(12, 8) == 4
-        assert gcd(100, 75) == 25
-        assert gcd(17, 13) == 1
-        assert gcd(0, 5) == 5
+        f = derecurse(_gcd)
+        assert f(12, 8) == 4
+        assert f(100, 75) == 25
+        assert f(17, 13) == 1
+        assert f(0, 5) == 5
 
     def test_power(self):
-        assert power(2, 0) == 1
-        assert power(2, 10) == 1024
-        assert power(3, 4) == 81
+        f = derecurse(_power)
+        assert f(2, 0) == 1
+        assert f(2, 10) == 1024
+        assert f(3, 4) == 81
 
     def test_sum_tail(self):
-        assert mysum(10) == 55
-        assert mysum(100) == 5050
+        f = derecurse(_mysum)
+        assert f(10) == 55
+        assert f(100) == 5050
 
     def test_non_recursive_unchanged(self):
-        assert add_wrapped(2, 3) == 5
-        assert not hasattr(add_wrapped, "__derecurse_strategy__")
+        wrapped = derecurse(add)
+        assert wrapped(2, 3) == 5
+        assert not hasattr(wrapped, "__derecurse_strategy__")
 
     def test_non_tail_warns(self):
         with warnings.catch_warnings(record=True) as w:
@@ -193,18 +191,22 @@ class TestDerecurse:
         assert f(10) == 55
 
     def test_wrapped_preserved(self):
-        assert hasattr(factorial, "__wrapped__")
+        f = derecurse(_factorial)
+        assert hasattr(f, "__wrapped__")
 
     def test_name_preserved(self):
-        assert factorial.__name__ == "factorial"
+        f = derecurse(_factorial)
+        assert f.__name__ == "_factorial"
 
     def test_two_base_cases(self):
-        assert collatz_steps(1) == 0
-        assert collatz_steps(6) == 8
+        f = derecurse(_collatz_steps)
+        assert f(1) == 0
+        assert f(6) == 8
 
     def test_keyword_args_in_call(self):
-        assert countdown_kw(5) == 0
-        assert countdown_kw(100) == 0
+        f = derecurse(_countdown_kw)
+        assert f(5) == 0
+        assert f(100) == 0
 
 
 # ─── Stress tests ─────────────────────────────────────────────────────────────
@@ -212,15 +214,17 @@ class TestDerecurse:
 class TestStress:
 
     def test_no_stack_overflow(self):
+        f = derecurse(_deep)
         default_limit = sys.getrecursionlimit()
-        assert deep(default_limit * 10) == default_limit * 10
+        assert f(default_limit * 10) == default_limit * 10
 
     def test_fibonacci_large_tail(self):
-        assert fib_tail(0) == 0
-        assert fib_tail(1) == 1
-        assert fib_tail(10) == 55
-        assert fib_tail(50) == 12586269025
-        result = fib_tail(10_000)
+        f = derecurse(_fib_tail)
+        assert f(0) == 0
+        assert f(1) == 1
+        assert f(10) == 55
+        assert f(50) == 12586269025
+        result = f(10_000)
         assert result > 0
 
 

@@ -59,7 +59,6 @@ pip install .
 - Only **tail-recursive** functions are optimized. Non-tail recursion
   (e.g. `return f(n-1) + f(n-2)`) cannot be safely converted and is left
   unchanged.
-- Mutual recursion (`MUTUAL`) is detected but not yet rewritten.
 - Requires Python 3.10+.
 
 ## Development

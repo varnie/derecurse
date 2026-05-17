@@ -23,7 +23,6 @@ from __future__ import annotations
 import ast
 import inspect
 import textwrap
-import types
 from .analyzer import AnalysisResult
 
 
@@ -110,37 +109,70 @@ class TailCallTransformer(ast.NodeTransformer):
     def _transform_body(self, stmts: list[ast.stmt]) -> list[ast.stmt]:
         result = []
         for stmt in stmts:
-            result.append(self._transform_stmt(stmt))
+            result.extend(self._transform_stmt(stmt))
         return result
 
-    def _transform_stmt(self, stmt: ast.stmt) -> ast.stmt:
+    def _transform_stmt(self, stmt: ast.stmt) -> list[ast.stmt]:
         if isinstance(stmt, ast.Return) and stmt.value is not None:
             transformed = self._try_transform_tail_return(stmt)
             if transformed is not None:
                 return transformed
-            return stmt
+            return [stmt]
 
         elif isinstance(stmt, ast.If):
             new_body = self._transform_body(stmt.body)
             new_orelse = self._transform_body(stmt.orelse)
-            return ast.If(test=stmt.test, body=new_body, orelse=new_orelse)
+            return [ast.If(test=stmt.test, body=new_body, orelse=new_orelse)]
 
-        elif isinstance(stmt, ast.For):
+        elif isinstance(stmt, (ast.For, ast.While, ast.AsyncFor)):
             new_body = self._transform_body(stmt.body)
-            return ast.For(
-                target=stmt.target,
-                iter=stmt.iter,
+            kw = dict(body=new_body, orelse=stmt.orelse)
+            if isinstance(stmt, ast.While):
+                kw["test"] = stmt.test
+            else:
+                kw["target"] = stmt.target
+                kw["iter"] = stmt.iter
+            return [type(stmt)(**kw)]
+
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            new_body = self._transform_body(stmt.body)
+            cls = type(stmt)
+            return [cls(
+                items=stmt.items,
                 body=new_body,
-                orelse=stmt.orelse,
-            )
+            )]
 
-        elif isinstance(stmt, ast.While):
+        elif isinstance(stmt, ast.Try):
             new_body = self._transform_body(stmt.body)
-            return ast.While(test=stmt.test, body=new_body, orelse=stmt.orelse)
+            new_handlers = [
+                ast.ExceptHandler(
+                    type=h.type, name=h.name,
+                    body=self._transform_body(h.body),
+                )
+                for h in stmt.handlers
+            ]
+            new_orelse = self._transform_body(stmt.orelse)
+            new_finalbody = self._transform_body(stmt.finalbody)
+            return [ast.Try(
+                body=new_body,
+                handlers=new_handlers,
+                orelse=new_orelse,
+                finalbody=new_finalbody,
+            )]
 
-        return stmt
+        elif hasattr(ast, 'Match') and isinstance(stmt, ast.Match):
+            new_cases = [
+                ast.match_case(
+                    pattern=case.pattern, guard=case.guard,
+                    body=self._transform_body(case.body),
+                )
+                for case in stmt.cases
+            ]
+            return [ast.Match(subject=stmt.subject, cases=new_cases)]
 
-    def _try_transform_tail_return(self, stmt: ast.Return) -> ast.stmt | None:
+        return [stmt]
+
+    def _try_transform_tail_return(self, stmt: ast.Return) -> list[ast.stmt] | None:
         """
         If `return func_name(a, b, c)` → replace with simultaneous
         param update + continue.
@@ -158,24 +190,15 @@ class TailCallTransformer(ast.NodeTransformer):
         call: ast.Call = expr
 
         # Build the new argument values
-        # Map positional args and keyword args to param names
         new_values: dict[str, ast.expr] = {}
 
-        # Positional args
         for i, arg_val in enumerate(call.args):
             if i < len(self.params):
                 new_values[self.params[i]] = arg_val
 
-        # Keyword args
         for kw in call.keywords:
             if kw.arg is not None:
                 new_values[kw.arg] = kw.value
-
-        # Build simultaneous assignment:
-        # We need to evaluate all RHS before assigning — use tuple unpack
-        # (param1, param2, ...) = (new_val1, new_val2, ...)
-        # Only reassign params that are actually passed in the call
-        # (others keep their current value)
 
         params_to_update = [p for p in self.params if p in new_values]
 
@@ -188,31 +211,20 @@ class TailCallTransformer(ast.NodeTransformer):
         )
 
         if len(params_to_update) == 1:
-            # Simple assignment: param = new_val
             p = params_to_update[0]
             assign = ast.Assign(
                 targets=[ast.Name(id=p, ctx=ast.Store())],
                 value=new_values[p],
             )
-            return ast.If(
-                test=ast.Constant(value=True),
-                body=[assign, raise_stmt],
-                orelse=[],
-            )
-        else:
-            # Tuple unpacking for simultaneous update (avoids ordering issues)
-            # (a, b, c) = (new_a, new_b, new_c)
-            targets = ast.Tuple(
-                elts=[ast.Name(id=p, ctx=ast.Store()) for p in params_to_update],
-                ctx=ast.Store(),
-            )
-            values = ast.Tuple(
-                elts=[new_values[p] for p in params_to_update],
-                ctx=ast.Load(),
-            )
-            assign = ast.Assign(targets=[targets], value=values)
-            return ast.If(
-                test=ast.Constant(value=True),
-                body=[assign, raise_stmt],
-                orelse=[],
-            )
+            return [assign, raise_stmt]
+
+        targets = ast.Tuple(
+            elts=[ast.Name(id=p, ctx=ast.Store()) for p in params_to_update],
+            ctx=ast.Store(),
+        )
+        values = ast.Tuple(
+            elts=[new_values[p] for p in params_to_update],
+            ctx=ast.Load(),
+        )
+        assign = ast.Assign(targets=[targets], value=values)
+        return [assign, raise_stmt]

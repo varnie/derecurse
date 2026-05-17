@@ -21,7 +21,6 @@ class RecursionPattern(Enum):
     NO_RECURSION = auto()
     TAIL_CALL    = auto()   # return f(...)  with nothing after
     NON_TAIL     = auto()   # return f(...) + something
-    MUTUAL       = auto()   # future
 
 
 @dataclass
@@ -103,7 +102,7 @@ def _get_source(func) -> str:
 
 
 def _find_func_def(tree: ast.AST, name: str) -> ast.FunctionDef | None:
-    for node in ast.walk(tree):
+    for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
     return None
@@ -143,7 +142,6 @@ class _RecursionVisitor(ast.NodeVisitor):
         self.recursive_calls = 0
         self.tail_call_count = 0
         self.non_tail_count = 0
-        self._in_tail_position = False
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Only analyze the top-level function body, not nested funcs
