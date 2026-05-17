@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "derecurse"
@@ -18,10 +18,8 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dynamic = ["dependencies"]
-
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["derecurse*"]
 
 [tool.pytest.ini_options]

@@ -12,7 +12,7 @@ try:
     from derecurse import derecurse, RecursionPattern
     from derecurse.analyzer import analyze
 except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
     from derecurse import derecurse, RecursionPattern
     from derecurse.analyzer import analyze
 

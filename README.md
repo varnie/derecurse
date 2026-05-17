@@ -34,15 +34,15 @@ factorial(100_000)  # no RecursionError
 ## Installation
 
 ```bash
-pip install derecurse
+pip install git+https://github.com/varnie/derecurse.git
 ```
 
-Or from source:
+Or from a local clone:
 
 ```bash
-git clone <url>
+git clone https://github.com/varnie/derecurse.git
 cd derecurse
-pip install -e .
+pip install .
 ```
 
 ## Features
@@ -65,6 +65,8 @@ pip install -e .
 ## Development
 
 ```bash
+git clone https://github.com/varnie/derecurse.git
+cd derecurse
 pip install -e .
 pip install pytest
 pytest -v
