@@ -11,7 +11,8 @@ from __future__ import annotations
 import functools
 import threading
 import warnings
-from typing import TypeVar, Callable
+from collections.abc import Callable
+from typing import TypeVar
 
 from .analyzer import analyze, RecursionPattern
 from .trampoline import trampoline_wrap

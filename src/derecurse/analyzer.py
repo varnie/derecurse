@@ -21,6 +21,7 @@ class RecursionPattern(Enum):
     NO_RECURSION = auto()
     TAIL_CALL    = auto()   # return f(...)  with nothing after
     NON_TAIL     = auto()   # return f(...) + something
+    MUTUAL       = auto()   # calls another function that calls back (future)
 
 
 @dataclass

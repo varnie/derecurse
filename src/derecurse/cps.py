@@ -254,7 +254,8 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
             # 'and' short-circuits: returns first falsy or last value.
             # Desugaring: a and b and c → c if a and b else a -- nope
             # Correct: a and b and c → (b if a else a) and c -- hmm, wrong again
-            # Actual desugaring: a and b and c → b if a else a, then if result and c → c if result else result
+            # Actual: a and b and c → b if a else a, then if result and c
+            # → c if result else result
             # Simpler: fold left-to-right: (a and b) -> IfExp(test=a, body=b, orelse=a)
             ifexp = vals[0]
             for v in vals[1:]:
@@ -533,11 +534,12 @@ def _cps_expr(expr: ast.expr, func_name: str, k_name: str | ast.expr) -> ast.exp
     # ── List / Tuple / Set ──────────────────────────────────────────────────
     if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
         elts = expr.elts
-        rebuild: object
         if isinstance(expr, ast.Set):
-            rebuild = lambda parts: ast.Set(elts=parts)
+            def rebuild(parts):
+                return ast.Set(elts=parts)
         else:
-            rebuild = lambda parts: type(expr)(elts=parts, ctx=ast.Load())
+            def rebuild(parts):
+                return type(expr)(elts=parts, ctx=ast.Load())
         result = _cps_seq(list(elts), func_name, k_name, rebuild)
         if result is not None:
             return result
@@ -620,8 +622,6 @@ def _cps_seq(
         final_k = k_name
 
     for idx in range(len(cps_indices) - 1, -1, -1):
-        pos = cps_indices[idx]
-        e = exprs[pos]
         t_var = temps[idx]
 
         if idx == len(cps_indices) - 1:
@@ -715,8 +715,8 @@ def _build_wrapper(
     """
     Build the trampoline wrapper AST:
 
-      def orig_name(p1, p2, ...):
-          __k__ = lambda v: lambda: v
+      def orig_name(p1, p2=p2_default, ...):
+          __k__ = lambda v: v
           __r__ = cps_name(p1, p2, ..., __k__)
           while callable(__r__):
               __r__ = __r__()
@@ -728,20 +728,19 @@ def _build_wrapper(
         for p in reversed(params):
             if p in defaults_dict:
                 val = defaults_dict[p]
-                defaults_list.insert(0, val if isinstance(val, ast.expr) else ast.Constant(value=val))
+                defaults_list.insert(
+                    0, val if isinstance(val, ast.expr) else ast.Constant(value=val),
+                )
             else:
                 break
 
     body: list[ast.stmt] = [
-        # __k__ = lambda v: lambda: v
+        # __k__ = lambda v: v  — identity continuation (no extra thunk)
         ast.Assign(
             targets=[ast.Name(id="__k__", ctx=ast.Store())],
             value=ast.Lambda(
                 args=_arguments("__v__"),
-                body=ast.Lambda(
-                    args=_arguments(),
-                    body=ast.Name(id="__v__", ctx=ast.Load()),
-                ),
+                body=ast.Name(id="__v__", ctx=ast.Load()),
             ),
         ),
         # __r__ = cps_name(p1, p2, ..., __k__)

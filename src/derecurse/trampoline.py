@@ -11,7 +11,8 @@ This approach works universally — in pytest, REPL, lambdas, anywhere.
 from __future__ import annotations
 import functools
 import threading
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -37,10 +38,6 @@ def trampoline_wrap(func: Callable) -> Callable:
     """
     func_name = func.__name__
     _lock = threading.Lock()
-
-    # Patch: replace recursive calls inside func with sentinel-returning calls
-    # We do this by temporarily swapping the function in its own globals
-    original_globals_ref = func.__globals__.get(func_name)
 
     def sentinel_func(*args, **kwargs):
         return _TailCall(args, kwargs)
