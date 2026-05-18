@@ -169,7 +169,7 @@ class _RecursionVisitor(ast.NodeVisitor):
             for handler in stmt.handlers:
                 self._visit_body(handler.body)
             self._visit_body(stmt.orelse)
-            self._visit_body(stmt.finalbody if hasattr(stmt, 'finalbody') else [])
+            self._visit_body(stmt.finalbody)
         elif hasattr(ast, 'Match') and isinstance(stmt, ast.Match):
             for case in stmt.cases:
                 self._visit_body(case.body)

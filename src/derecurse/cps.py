@@ -78,6 +78,9 @@ def _call(
 
 
 def cps_rewrite(func, analysis: AnalysisResult):
+    global _fresh_counter
+    _fresh_counter = 0
+
     src = inspect.getsource(func)
     src = textwrap.dedent(src)
     tree = ast.parse(src)
@@ -90,7 +93,7 @@ def cps_rewrite(func, analysis: AnalysisResult):
     new_tree = transformer.visit(tree)
     ast.fix_missing_locations(new_tree)
 
-    wrapper_func = _build_wrapper(orig_name, cps_name, params)
+    wrapper_func = _build_wrapper(orig_name, cps_name, params, analysis.defaults)
     wrapper_tree = ast.Module(body=[wrapper_func], type_ignores=[])
     ast.fix_missing_locations(wrapper_tree)
 
@@ -706,20 +709,31 @@ def _make_binop_k(
 
 
 def _build_wrapper(
-    orig_name: str, cps_name: str, params: list[str]
+    orig_name: str, cps_name: str, params: list[str],
+    defaults_dict: dict[str, object] | None = None,
 ) -> ast.FunctionDef:
     """
     Build the trampoline wrapper AST:
 
       def orig_name(p1, p2, ...):
-          __k = lambda v: lambda: v
-          __r = cps_name(p1, p2, ..., __k)
-          while callable(__r):
-              __r = __r()
-          return __r
+          __k__ = lambda v: lambda: v
+          __r__ = cps_name(p1, p2, ..., __k__)
+          while callable(__r__):
+              __r__ = __r__()
+          return __r__
     """
+    # Build defaults list right-aligned with trailing params
+    defaults_list: list[ast.expr] = []
+    if defaults_dict:
+        for p in reversed(params):
+            if p in defaults_dict:
+                val = defaults_dict[p]
+                defaults_list.insert(0, val if isinstance(val, ast.expr) else ast.Constant(value=val))
+            else:
+                break
+
     body: list[ast.stmt] = [
-        # __k = lambda v: lambda: v
+        # __k__ = lambda v: lambda: v
         ast.Assign(
             targets=[ast.Name(id="__k__", ctx=ast.Store())],
             value=ast.Lambda(
@@ -730,7 +744,7 @@ def _build_wrapper(
                 ),
             ),
         ),
-        # __r = cps_name(p1, p2, ..., __k)
+        # __r__ = cps_name(p1, p2, ..., __k__)
         ast.Assign(
             targets=[ast.Name(id="__r__", ctx=ast.Store())],
             value=_call(
@@ -739,7 +753,7 @@ def _build_wrapper(
                 + [ast.Name(id="__k__", ctx=ast.Load())],
             ),
         ),
-        # while callable(__r): __r = __r()
+        # while callable(__r__): __r__ = __r__()
         ast.While(
             test=_call(
                 ast.Name(id="callable", ctx=ast.Load()),
@@ -753,13 +767,13 @@ def _build_wrapper(
             ],
             orelse=[],
         ),
-        # return __r
+        # return __r__
         ast.Return(value=ast.Name(id="__r__", ctx=ast.Load())),
     ]
 
     return ast.FunctionDef(
         name=orig_name,
-        args=_arguments(*params, kwarg=ast.arg(arg="__kwargs__")),
+        args=_arguments(*params, defaults=defaults_list or None),
         body=body,
         decorator_list=[],
     )

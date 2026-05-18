@@ -8,6 +8,8 @@ Strategy selection:
 
 from __future__ import annotations
 
+import functools
+import threading
 import warnings
 from typing import TypeVar, Callable
 
@@ -77,16 +79,19 @@ def _lazy_cps_wrapper(func, analysis):
     CPS-converts on the first RecursionError.
     """
     cps_func = None
+    _lock = threading.Lock()
 
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         nonlocal cps_func
         try:
             return func(*args, **kwargs)
         except RecursionError:
-            if cps_func is None:
-                cps_func = _build_cps(func, analysis)
+            with _lock:
                 if cps_func is None:
-                    raise
+                    cps_func = _build_cps(func, analysis)
+                    if cps_func is None:
+                        raise
             return cps_func(*args, **kwargs)
 
     wrapper.__derecurse_strategy__ = "lazy_cps"

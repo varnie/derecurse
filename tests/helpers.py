@@ -16,8 +16,8 @@ def wrap_non_tail(func, *args):
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always", category=UserWarning)
         result = wrapped(*args)
-    failures = [w for w in caught if "CPS rewrite failed" in str(w.message)]
-    assert not failures, "; ".join(str(w.message) for w in failures)
+    failures = [cw for cw in caught if "CPS rewrite failed" in str(cw.message)]
+    assert not failures, "; ".join(str(f.message) for f in failures)
     return wrapped, result
 
 
